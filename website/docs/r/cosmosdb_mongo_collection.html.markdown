@@ -54,6 +54,8 @@ The `index` block supports the following:
 
 * `keys` - (Required) Specifies the list of user settable keys for each Cosmos DB Mongo Collection.
 
+~> **NOTE:** To use custom indexes on 
+
 * `unique` - (Optional) Is the index unique or not? Defaults to `false`.
 
 ## Attributes Reference

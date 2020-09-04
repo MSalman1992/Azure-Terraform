@@ -133,9 +133,6 @@ func TestAccAzureRMCosmosDbMongoCollection_withIndex(t *testing.T) {
 				Config: testAccAzureRMCosmosDbMongoCollection_withIndex(data),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testCheckAzureRMCosmosDbMongoCollectionExists(data.ResourceName),
-					resource.TestCheckResourceAttr(data.ResourceName, "default_ttl_seconds", "707"),
-					resource.TestCheckResourceAttr(data.ResourceName, "index.#", "3"),
-					resource.TestCheckResourceAttr(data.ResourceName, "system_indexes.#", "2"),
 				),
 			},
 			data.ImportStep(),
@@ -272,6 +269,39 @@ resource "azurerm_cosmosdb_mongo_collection" "test" {
   database_name       = azurerm_cosmosdb_mongo_database.test.name
   default_ttl_seconds = 707
   throughput          = 400
+
+  index {
+    keys   = ["seven", "six"]
+    unique = true
+  }
+
+  index {
+    keys   = ["day"]
+    unique = false
+  }
+
+  index {
+    keys = ["month"]
+  }
+}
+`, testAccAzureRMCosmosDbMongoDatabase_basic(data), data.RandomInteger)
+}
+
+func testAccAzureRMCosmosDbMongoCollection_withValidIndex(data acceptance.TestData) string {
+	return fmt.Sprintf(`
+%[1]s
+
+resource "azurerm_cosmosdb_mongo_collection" "test" {
+  name                = "acctest-%[2]d"
+  resource_group_name = azurerm_cosmosdb_mongo_database.test.resource_group_name
+  account_name        = azurerm_cosmosdb_mongo_database.test.account_name
+  database_name       = azurerm_cosmosdb_mongo_database.test.name
+  default_ttl_seconds = 707
+  throughput          = 400
+
+  index {
+    keys = ["_id"]
+  }
 
   index {
     keys   = ["seven", "six"]

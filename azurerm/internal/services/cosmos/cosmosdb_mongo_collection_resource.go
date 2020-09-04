@@ -16,6 +16,7 @@ import (
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/services/cosmos/common"
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/services/cosmos/migration"
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/services/cosmos/parse"
+	cosmosValidate "github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/services/cosmos/validate"
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/timeouts"
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/utils"
 )
@@ -92,6 +93,7 @@ func resourceArmCosmosDbMongoCollection() *schema.Resource {
 				Computed:     true,
 				ValidateFunc: validate.CosmosThroughput,
 			},
+
 			"index": {
 				Type:     schema.TypeSet,
 				Optional: true,
@@ -160,6 +162,10 @@ func resourceArmCosmosDbMongoCollectionCreate(d *schema.ResourceData, meta inter
 	var ttl *int
 	if v := d.Get("default_ttl_seconds").(int); v > 0 {
 		ttl = utils.Int(v)
+	}
+
+	if !cosmosValidate.CheckMongo36IndexRequirements(d) {
+		return fmt.Errorf("custom indexes require the inclusion of an `_id` index")
 	}
 
 	db := documentdb.MongoDBCollectionCreateUpdateParameters{
@@ -447,3 +453,4 @@ func flattenCosmosMongoCollectionIndex(input *[]documentdb.MongoIndex) (*[]map[s
 
 	return &indexes, &systemIndexes, ttl
 }
+
