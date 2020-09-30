@@ -102,9 +102,7 @@ func resourceArmLogicAppIntegrationAccountCreateUpdate(d *schema.ResourceData, m
 	if iseID, ok := d.GetOk("integration_service_environment_id"); ok {
 		account.IntegrationAccountProperties = &logic.IntegrationAccountProperties{
 			IntegrationServiceEnvironment: &logic.IntegrationServiceEnvironment{
-				Properties: &logic.IntegrationServiceEnvironmentProperties{
-					IntegrationServiceEnvironmentID: utils.String(iseID.(string)),
-				},
+				ID: utils.String(iseID.(string)),
 			},
 		}
 	}
