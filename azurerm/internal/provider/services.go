@@ -2,6 +2,7 @@ package provider
 
 import (
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/sdk"
+	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/services/aadmgmt"
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/services/advisor"
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/services/analysisservices"
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/services/apimanagement"
@@ -100,6 +101,7 @@ func SupportedTypedServices() []sdk.TypedServiceRegistration {
 
 func SupportedUntypedServices() []sdk.UntypedServiceRegistration {
 	return []sdk.UntypedServiceRegistration{
+		aadmgmt.Registration{},
 		advisor.Registration{},
 		analysisservices.Registration{},
 		apimanagement.Registration{},
