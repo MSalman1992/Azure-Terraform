@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/features"
+
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-06-01/compute"
 	"github.com/hashicorp/go-azure-helpers/response"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
@@ -31,7 +33,7 @@ import (
 // TODO: confirm locking as appropriate
 
 func resourceLinuxVirtualMachine() *schema.Resource {
-	return &schema.Resource{
+	linuxVirtualMachineSchema := &schema.Resource{
 		Create: resourceLinuxVirtualMachineCreate,
 		Read:   resourceLinuxVirtualMachineRead,
 		Update: resourceLinuxVirtualMachineUpdate,
@@ -282,6 +284,11 @@ func resourceLinuxVirtualMachine() *schema.Resource {
 			},
 		},
 	}
+	if features.VMDataDiskBeta() {
+		linuxVirtualMachineSchema.Schema["data_disks"] = virtualMachineDataDiskSchema()
+	}
+
+	return linuxVirtualMachineSchema
 }
 
 func resourceLinuxVirtualMachineCreate(d *schema.ResourceData, meta interface{}) error {
@@ -345,6 +352,15 @@ func resourceLinuxVirtualMachineCreate(d *schema.ResourceData, meta interface{})
 	osDiskRaw := d.Get("os_disk").([]interface{})
 	osDisk := expandVirtualMachineOSDisk(osDiskRaw, compute.Linux)
 
+	dataDisks := &[]compute.DataDisk{}
+
+	if features.VMDataDiskBeta() {
+		dataDisks, err = expandVirtualMachineDataDisks(d, meta)
+		if err != nil {
+			return err
+		}
+	}
+
 	secretsRaw := d.Get("secret").([]interface{})
 	secrets := expandLinuxSecrets(secretsRaw)
 
@@ -387,10 +403,7 @@ func resourceLinuxVirtualMachineCreate(d *schema.ResourceData, meta interface{})
 			StorageProfile: &compute.StorageProfile{
 				ImageReference: sourceImageReference,
 				OsDisk:         osDisk,
-
-				// Data Disks are instead handled via the Association resource - as such we can send an empty value here
-				// but for Updates this'll need to be nil, else any associations will be overwritten
-				DataDisks: &[]compute.DataDisk{},
+				DataDisks:      dataDisks,
 			},
 
 			// Optional
@@ -650,6 +663,16 @@ func resourceLinuxVirtualMachineRead(d *schema.ResourceData, meta interface{}) e
 		if err := d.Set("source_image_reference", flattenSourceImageReference(profile.ImageReference)); err != nil {
 			return fmt.Errorf("setting `source_image_reference`: %+v", err)
 		}
+
+		if features.VMDataDiskBeta() {
+			if profile.DataDisks != nil {
+				dataDisks, err := flattenVirtualMachineDataDisks(profile.DataDisks)
+				if err != nil {
+					return err
+				}
+				d.Set("data_disks", dataDisks)
+			}
+		}
 	}
 
 	encryptionAtHostEnabled := false
@@ -681,6 +704,7 @@ func resourceLinuxVirtualMachineRead(d *schema.ResourceData, meta interface{}) e
 
 func resourceLinuxVirtualMachineUpdate(d *schema.ResourceData, meta interface{}) error {
 	client := meta.(*clients.Client).Compute.VMClient
+	disksClient := meta.(*clients.Client).Compute.DisksClient
 	ctx, cancel := timeouts.ForUpdate(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
@@ -825,6 +849,55 @@ func resourceLinuxVirtualMachineUpdate(d *schema.ResourceData, meta interface{})
 		osDisk := expandVirtualMachineOSDisk(osDiskRaw, compute.Linux)
 		update.VirtualMachineProperties.StorageProfile = &compute.StorageProfile{
 			OsDisk: osDisk,
+		}
+	}
+
+	// list of disks for expand operations
+	dataDisksForGrow := make([]map[string]interface{}, 0)
+	// list of disks with encryption set changes
+	dataDisksForEncrypt := make([]map[string]interface{}, 0)
+	if features.VMDataDiskBeta() && d.HasChange("data_disks") {
+		shouldUpdate = true
+
+		oldRaw, newRaw := d.GetChange("data_disks.0.local")
+		oldDisks := oldRaw.(*schema.Set).List()
+		newDisks := newRaw.(*schema.Set).List()
+		for _, o := range oldDisks {
+			oldDisk := o.(map[string]interface{})
+			if oldDiskName, ok := oldDisk["name"]; ok {
+				for _, n := range newDisks {
+					newDisk := n.(map[string]interface{})
+					if newDiskName, ok := newDisk["name"]; ok && oldDiskName.(string) == newDiskName.(string) {
+						if newDisk["disk_size_gb"].(int) < oldDisk["disk_size_gb"].(int) {
+							return fmt.Errorf("new disk size cannot be smaller than existing for %q, in Virtual Machine %q (resource group %q)", oldDisk["name"], id.Name, id.ResourceGroup)
+						} else if newDisk["disk_size_gb"].(int) > oldDisk["disk_size_gb"].(int) {
+							shouldShutDown = true
+							shouldDeallocate = true
+							dataDisksForGrow = append(dataDisksForGrow, newDisk)
+						}
+						if newDisk["disk_encryption_set_id"].(string) != oldDisk["disk_encryption_set_id"].(string) {
+							dataDisksForEncrypt = append(dataDisksForEncrypt, newDisk)
+						}
+					}
+				}
+			}
+		}
+		// EncryptionSet changes for "existing" disks
+		oldExistingRaw, newExistingRaw := d.GetChange("data_disks.0.existing")
+		oldExisting := oldExistingRaw.(*schema.Set).List()
+		newExisting := newExistingRaw.(*schema.Set).List()
+		for _, o := range oldExisting {
+			oldDisk := o.(map[string]interface{})
+			if oldDiskID, ok := oldDisk["managed_disk_id"]; ok {
+				for _, n := range newExisting {
+					newDisk := n.(map[string]interface{})
+					if newDiskID, ok := newDisk["managed_disk_id"]; ok && oldDiskID.(string) == newDiskID.(string) {
+						if newDisk["disk_encryption_set_id"].(string) != oldDisk["disk_encryption_set_id"].(string) {
+							dataDisksForEncrypt = append(dataDisksForEncrypt, newDisk)
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -983,8 +1056,6 @@ func resourceLinuxVirtualMachineUpdate(d *schema.ResourceData, meta interface{})
 		newSize := d.Get("os_disk.0.disk_size_gb").(int)
 		log.Printf("[DEBUG] Resizing OS Disk %q for Linux Virtual Machine %q (Resource Group %q) to %dGB..", diskName, id.Name, id.ResourceGroup, newSize)
 
-		disksClient := meta.(*clients.Client).Compute.DisksClient
-
 		update := compute.DiskUpdate{
 			DiskUpdateProperties: &compute.DiskUpdateProperties{
 				DiskSizeGB: utils.Int32(int32(newSize)),
@@ -1030,7 +1101,76 @@ func resourceLinuxVirtualMachineUpdate(d *schema.ResourceData, meta interface{})
 
 			log.Printf("[DEBUG] Updating encryption settings of OS Disk %q for Linux Virtual Machine %q (Resource Group %q) to %q.", diskName, id.Name, id.ResourceGroup, diskEncryptionSetId)
 		} else {
-			return fmt.Errorf("Once a customer-managed key is used, you can’t change the selection back to a platform-managed key")
+			return fmt.Errorf("once a customer-managed key is used, you can’t change the selection back to a platform-managed key")
+		}
+	}
+
+	if features.VMDataDiskBeta() && d.HasChanges("data_disks.0.local", "data_disks.0.existing") {
+		shouldUpdate = true
+		dataDisks, err := expandVirtualMachineDataDisks(d, meta)
+		if err != nil {
+			return err
+		}
+
+		// Do we have disks to resize or change encryption set?
+		for _, v := range dataDisksForEncrypt {
+			diskName, ok := v["name"].(string)
+			if !ok {
+				return fmt.Errorf("could not resize data disk, empty value for `name`")
+			}
+			diskEncryptionSetID, ok := v["disk_encryption_set_id"].(string)
+			if !ok {
+				return fmt.Errorf("failed to read new disk Encryption Eet ID for Data Disk %q (resource group %q)", diskName, id.ResourceGroup)
+			}
+			diskUpdate := compute.DiskUpdate{
+				DiskUpdateProperties: &compute.DiskUpdateProperties{
+					Encryption: &compute.Encryption{
+						DiskEncryptionSetID: utils.String(diskEncryptionSetID),
+					},
+				},
+			}
+
+			encryptionUpdateFuture, err := disksClient.Update(ctx, id.ResourceGroup, diskName, diskUpdate)
+			if err != nil {
+				return fmt.Errorf("failed resizing Data Disk %q for Virtual Machine %q (resource group %q): %+v", diskName, id.Name, id.ResourceGroup, err)
+			}
+			if err = encryptionUpdateFuture.WaitForCompletionRef(ctx, client.Client); err != nil {
+				return fmt.Errorf("failed waiting for resize of Data Disk %q for Virtual Machine %q (resource group %q): %+v", diskName, id.Name, id.ResourceGroup, err)
+			}
+		}
+
+		for _, v := range dataDisksForGrow {
+			diskName, ok := v["name"].(string)
+			if !ok {
+				return fmt.Errorf("could not resize data disk, empty value for `name`")
+			}
+			diskSizeGB, ok := v["disk_size_gb"].(int)
+			if !ok {
+				return fmt.Errorf("failed to read new disk size for Data Disk %q (resource group %q)", diskName, id.ResourceGroup)
+			}
+
+			diskUpdate := compute.DiskUpdate{
+				DiskUpdateProperties: &compute.DiskUpdateProperties{
+					DiskSizeGB: utils.Int32(int32(diskSizeGB)),
+				},
+			}
+
+			resizeFuture, err := disksClient.Update(ctx, id.ResourceGroup, diskName, diskUpdate)
+			if err != nil {
+				return fmt.Errorf("failed resizing Data Disk %q for Virtual Machine %q (resource group %q): %+v", diskName, id.Name, id.ResourceGroup, err)
+			}
+			if err = resizeFuture.WaitForCompletionRef(ctx, client.Client); err != nil {
+				return fmt.Errorf("failed waiting for resize of Data Disk %q for Virtual Machine %q (resource group %q): %+v", diskName, id.Name, id.ResourceGroup, err)
+			}
+		}
+
+		// now disks are resized, we can put the new list into the VMUpdate
+		if update.VirtualMachineProperties.StorageProfile == nil {
+			update.VirtualMachineProperties.StorageProfile = &compute.StorageProfile{
+				DataDisks: dataDisks,
+			}
+		} else {
+			update.VirtualMachineProperties.StorageProfile.DataDisks = dataDisks
 		}
 	}
 
@@ -1068,6 +1208,7 @@ func resourceLinuxVirtualMachineUpdate(d *schema.ResourceData, meta interface{})
 
 func resourceLinuxVirtualMachineDelete(d *schema.ResourceData, meta interface{}) error {
 	client := meta.(*clients.Client).Compute.VMClient
+	disksClient := meta.(*clients.Client).Compute.DisksClient
 	ctx, cancel := timeouts.ForDelete(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
@@ -1126,7 +1267,6 @@ func resourceLinuxVirtualMachineDelete(d *schema.ResourceData, meta interface{})
 	deleteOSDisk := meta.(*clients.Client).Features.VirtualMachine.DeleteOSDiskOnDeletion
 	if deleteOSDisk {
 		log.Printf("[DEBUG] Deleting OS Disk from Linux Virtual Machine %q (Resource Group %q)..", id.Name, id.ResourceGroup)
-		disksClient := meta.(*clients.Client).Compute.DisksClient
 		managedDiskId := ""
 		if props := existing.VirtualMachineProperties; props != nil && props.StorageProfile != nil && props.StorageProfile.OsDisk != nil {
 			if disk := props.StorageProfile.OsDisk.ManagedDisk; disk != nil && disk.ID != nil {
@@ -1158,6 +1298,29 @@ func resourceLinuxVirtualMachineDelete(d *schema.ResourceData, meta interface{})
 		}
 	} else {
 		log.Printf("[DEBUG] Skipping Deleting OS Disk from Linux Virtual Machine %q (Resource Group %q)..", id.Name, id.ResourceGroup)
+	}
+
+	if features.VMDataDiskBeta() {
+		deleteDataDiskOnDeletion := meta.(*clients.Client).Features.VirtualMachine.DeleteDataDiskOnDeletion
+
+		// delete any disks created with the VM if feature toggled to do so. "existing" disks are not affected.
+		if deleteDataDiskOnDeletion {
+			if props := existing.VirtualMachineProperties; props != nil && props.StorageProfile != nil && props.StorageProfile.DataDisks != nil {
+				dataDisks := *props.StorageProfile.DataDisks
+				for _, v := range dataDisks {
+					if v.CreateOption == compute.DiskCreateOptionTypesEmpty && v.Name != nil {
+						deleteFuture, err := disksClient.Delete(ctx, id.ResourceGroup, *v.Name)
+						if err != nil {
+							return fmt.Errorf("failure deleting Data Disk %q (Virtual Machine %q / resource group %q): %+v", *v.Name, id.Name, id.ResourceGroup, err)
+						}
+
+						if err = deleteFuture.WaitForCompletionRef(ctx, disksClient.Client); err != nil {
+							return fmt.Errorf("failure waiting for deletion of Data Disk%q (Virtual Machine %q / resource group %q): %+v", *v.Name, id.Name, id.ResourceGroup, err)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Need to add a get and a state wait to avoid bug in network API where the attached disk(s) are not actually deleted
