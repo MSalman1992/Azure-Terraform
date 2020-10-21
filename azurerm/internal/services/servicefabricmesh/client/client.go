@@ -7,6 +7,7 @@ import (
 
 type Client struct {
 	ApplicationClient *servicefabricmesh.ApplicationClient
+	GatewayClient     *servicefabricmesh.GatewayClient
 	NetworkClient     *servicefabricmesh.NetworkClient
 	SecretClient      *servicefabricmesh.SecretClient
 	SecretValueClient *servicefabricmesh.SecretValueClient
@@ -16,6 +17,9 @@ type Client struct {
 func NewClient(o *common.ClientOptions) *Client {
 	applicationsClient := servicefabricmesh.NewApplicationClientWithBaseURI(o.ResourceManagerEndpoint, o.SubscriptionId)
 	o.ConfigureClient(&applicationsClient.Client, o.ResourceManagerAuthorizer)
+
+	gatewaysClient := servicefabricmesh.NewGatewayClientWithBaseURI(o.ResourceManagerEndpoint, o.SubscriptionId)
+	o.ConfigureClient(&gatewaysClient.Client, o.ResourceManagerAuthorizer)
 
 	networksClient := servicefabricmesh.NewNetworkClientWithBaseURI(o.ResourceManagerEndpoint, o.SubscriptionId)
 	o.ConfigureClient(&networksClient.Client, o.ResourceManagerAuthorizer)
@@ -31,6 +35,7 @@ func NewClient(o *common.ClientOptions) *Client {
 
 	return &Client{
 		ApplicationClient: &applicationsClient,
+		GatewayClient:     &gatewaysClient,
 		NetworkClient:     &networksClient,
 		SecretClient:      &secretsClient,
 		SecretValueClient: &secretValuesClient,
