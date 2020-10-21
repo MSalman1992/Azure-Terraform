@@ -132,22 +132,29 @@ resource "azurerm_resource_group" "test" {
   location = "%s"
 }
 
+resource "azurerm_service_fabric_mesh_local_network" "test" {
+  name                   = "accTest-%d"
+  resource_group_name    = azurerm_resource_group.test.name
+  location               = azurerm_resource_group.test.location
+  network_address_prefix = "10.0.0.0/22"
+}
+
 resource "azurerm_service_fabric_mesh_gateway" "test" {
   name                = "accTest-%d"
   resource_group_name = azurerm_resource_group.test.name
   location            = azurerm_resource_group.test.location
   
   source_network {
-    name = "testSourceNetwork"
+    name = "Other"
   }
 
   destination_network {
-    name = "testDestinationNetwork"
+    id = azurerm_service_fabric_mesh_local_network.test.id
   }
 
   description = "Test Description"
 }
-`, data.RandomInteger, data.Locations.Primary, data.RandomInteger)
+`, data.RandomInteger, data.Locations.Primary, data.RandomInteger, data.RandomInteger)
 }
 
 func testAccAzureRMServiceFabricMeshGateway_update(data acceptance.TestData) string {
@@ -161,15 +168,29 @@ resource "azurerm_resource_group" "test" {
   location = "%s"
 }
 
+resource "azurerm_service_fabric_mesh_local_network" "test" {
+  name                   = "accTest-%d"
+  resource_group_name    = azurerm_resource_group.test.name
+  location               = azurerm_resource_group.test.location
+  network_address_prefix = "10.0.0.0/22"
+}
+
 resource "azurerm_service_fabric_mesh_gateway" "test" {
   name                = "accTest-%d"
   resource_group_name = azurerm_resource_group.test.name
   location            = azurerm_resource_group.test.location
-  description         = "Test Description"
-
-  tags = {
-    Hello = "World"
+  
+  source_network {
+    name = "Other"
+    endpoint_references = ["a", "b"]
   }
+
+  destination_network {
+    id = azurerm_service_fabric_mesh_local_network.test.id
+        endpoint_references = ["d", "e"]
+  }
+
+  description = "Test Description"
 }
-`, data.RandomInteger, data.Locations.Primary, data.RandomInteger)
+`, data.RandomInteger, data.Locations.Primary, data.RandomInteger, data.RandomInteger)
 }
