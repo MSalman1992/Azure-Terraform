@@ -147,7 +147,22 @@ func testAccRoleDefinition_emptyName(t *testing.T) {
 	})
 }
 
-func testAccRoleDefinition_managementGroup(t *testing.T) {
+func TestAccRoleDefinition_emptyPermissions(t *testing.T) {
+	data := acceptance.BuildTestData(t, "azurerm_role_definition", "test")
+	r := RoleDefinitionResource{}
+
+	data.ResourceTest(t, r, []resource.TestStep{
+		{
+			Config: r.emptyPermissions(data),
+			Check: resource.ComposeTestCheckFunc(
+				check.That(data.ResourceName).ExistsInAzure(r),
+			),
+		},
+		data.ImportStep(),
+	})
+}
+
+func TestAccRoleDefinition_managementGroup(t *testing.T) {
 	data := acceptance.BuildTestData(t, "azurerm_role_definition", "test")
 	r := RoleDefinitionResource{}
 
@@ -325,6 +340,28 @@ resource "azurerm_role_definition" "test" {
   ]
 }
 `, data.RandomInteger)
+}
+
+func (r RoleDefinitionResource) emptyPermissions(data acceptance.TestData) string {
+	return fmt.Sprintf(`
+provider "azurerm" {
+  features {}
+}
+
+data "azurerm_subscription" "primary" {
+}
+
+resource "azurerm_resource_group" "test" {
+  name     = "acctestrg-%d"
+  location = %q
+}
+
+resource "azurerm_role_definition" "test" {
+  name              = "acctestrd-%d"
+  scope             = azurerm_resource_group.test.id
+  assignable_scopes = [azurerm_resource_group.test.id]
+}
+`, data.RandomInteger, data.Locations.Primary, data.RandomInteger)
 }
 
 func (r RoleDefinitionResource) TestAccRoleDefinition_managementGroup(id string, data acceptance.TestData) string {
