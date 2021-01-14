@@ -27,8 +27,9 @@ func TestAccRoleDefinition(t *testing.T) {
 			"complete": testAccRoleDefinition_complete,
 		},
 		"empty": {
-			"empty_name":      testAccRoleDefinition_emptyName,
-			"update_empty_id": testAccRoleDefinition_updateEmptyId,
+			"empty_name":        testAccRoleDefinition_emptyName,
+			"empty_permissions": testAccRoleDefinition_emptyPermissions,
+			"update_empty_id":   testAccRoleDefinition_updateEmptyId,
 		},
 		"import": {
 			"requiresImport": testAccRoleDefinition_requiresImport,
@@ -147,7 +148,7 @@ func testAccRoleDefinition_emptyName(t *testing.T) {
 	})
 }
 
-func TestAccRoleDefinition_emptyPermissions(t *testing.T) {
+func testAccRoleDefinition_emptyPermissions(t *testing.T) {
 	data := acceptance.BuildTestData(t, "azurerm_role_definition", "test")
 	r := RoleDefinitionResource{}
 
@@ -162,7 +163,7 @@ func TestAccRoleDefinition_emptyPermissions(t *testing.T) {
 	})
 }
 
-func TestAccRoleDefinition_managementGroup(t *testing.T) {
+func testAccRoleDefinition_managementGroup(t *testing.T) {
 	data := acceptance.BuildTestData(t, "azurerm_role_definition", "test")
 	r := RoleDefinitionResource{}
 
