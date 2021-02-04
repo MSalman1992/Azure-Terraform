@@ -18,6 +18,5 @@ func VMSSExtensionsBeta() bool {
 //
 // Set the Environment Variable `ARM_PROVIDER_VM_DATADISKS_BETA` to `true`
 func VMDataDiskBeta() bool {
-	// return strings.EqualFold(os.Getenv("ARM_PROVIDER_VM_DATADISKS_BETA"), "true")
-	return true
+	return strings.EqualFold(os.Getenv("ARM_PROVIDER_VM_DATADISKS_BETA"), "true")
 }
